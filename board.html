@@ -49,6 +49,27 @@
     transform:translateY(1vh); transition:opacity .2s, transform .2s}
   .delta.show{opacity:1; transform:translateY(0)}
   .delta.up{color:#4ade80}
+  /* 數字跳動：短促放大再回彈 */
+  @keyframes bump{
+    0%{transform:scale(1)}
+    28%{transform:scale(1.085)}
+    62%{transform:scale(.985)}
+    100%{transform:scale(1)}
+  }
+  .score.bump{animation:bump .34s cubic-bezier(.2,.9,.2,1)}
+  /* 卡片閃光：加分綠、扣分紅 */
+  @keyframes flashUp{
+    0%{box-shadow:0 0 0 0 rgba(74,222,128,0)}
+    26%{box-shadow:0 0 4vh .5vh rgba(74,222,128,.6), 0 0 3vh -1vh rgba(74,222,128,.9) inset}
+    100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}
+  }
+  @keyframes flashDown{
+    0%{box-shadow:0 0 0 0 rgba(248,113,113,0)}
+    26%{box-shadow:0 0 4vh .5vh rgba(248,113,113,.6), 0 0 3vh -1vh rgba(248,113,113,.9) inset}
+    100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}
+  }
+  .team.flash-up{animation:flashUp .8s ease-out}
+  .team.flash-down{animation:flashDown .8s ease-out}
   .delta.down{color:#f87171}
 
   /* 右下 QR：手機控制台 */
@@ -139,6 +160,13 @@ function render(s){
     // delta
     const d = t.score - from;
     if (d !== 0){
+      // 卡片閃光（加分綠、扣分紅）
+      const cls = d > 0 ? 'flash-up' : 'flash-down';
+      n.el.classList.remove('flash-up', 'flash-down');
+      void n.el.offsetWidth;
+      n.el.classList.add(cls);
+      clearTimeout(n.el._ft);
+      n.el._ft = setTimeout(() => n.el.classList.remove(cls), 850);
       n.delta.textContent = (d>0?'+':'') + d.toLocaleString('en-US');
       n.delta.className = 'delta show ' + (d>0?'up':'down');
       clearTimeout(n.delta._t);
@@ -175,11 +203,38 @@ function fitSize(el, txt){
 }
 
 function roll(el, from, to){
-  // 一律立即顯示，不做數字滾動。
-  // 原因：滾動靠 requestAnimationFrame，分頁/視窗不是前景時瀏覽器會暫停它，
-  // 投影機那台如果被別的視窗蓋住，觀眾會看到卡住的中間數字（實測發生過）。
+  // 數字滾動（臨場感）＋ 保證最終值：動畫靠 rAF，若分頁被判定為不可見會暫停，
+  // 所以另外掛一個 timer 強制在動畫時間之後把最終數字寫進去（背景分頁 timer 最多延遲 1 秒，不會永遠卡住）。
+  clearTimeout(el._finish);
+  if (from === to){
+    cancelAnimationFrame(el._raf);
+    el.textContent = fmt(to);
+    return;
+  }
+  const shown = parseInt((el.textContent || '').replace(/[^0-9-]/g, ''), 10);
+  const start = Number.isFinite(shown) && shown !== 0 ? shown : from;
+  const dur = Math.min(460, 240 + Math.abs(to - start) * 0.02);   // 差越多滾久一點，但不超過 0.46 秒
+
+  el.classList.remove('bump');
+  void el.offsetWidth;               // 強制重排，讓動畫可以連續觸發
+  el.classList.add('bump');
+
+  const t0 = performance.now();
   cancelAnimationFrame(el._raf);
-  el.textContent = fmt(to);
+  const step = (now)=>{
+    const p = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - p, 3);          // ease-out：一開始快、收尾穩
+    el.textContent = fmt(Math.round(start + (to - start) * e));
+    if (p < 1) el._raf = requestAnimationFrame(step);
+    else el.textContent = fmt(to);
+  };
+  el._raf = requestAnimationFrame(step);
+
+  // 保險：不論 rAF 有沒有跑，時間到就把最終值寫定
+  el._finish = setTimeout(() => {
+    cancelAnimationFrame(el._raf);
+    el.textContent = fmt(to);
+  }, dur + 90);
 }
 
 function drawQR(){

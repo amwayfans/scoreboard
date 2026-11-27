@@ -52,11 +52,19 @@
   /* 數字跳動：短促放大再回彈 */
   @keyframes bump{
     0%{transform:scale(1)}
-    28%{transform:scale(1.085)}
-    62%{transform:scale(.985)}
+    18%{transform:scale(1.16)}
+    46%{transform:scale(1.05)}
+    72%{transform:scale(.975)}
     100%{transform:scale(1)}
   }
-  .score.bump{animation:bump .34s cubic-bezier(.2,.9,.2,1)}
+  .score.bump{animation:bump .52s cubic-bezier(.2,.9,.2,1)}
+  /* 滾動中：數字自帶微光，遠看更明顯 */
+  @keyframes rollglow{
+    0%{text-shadow:0 0 0 rgba(255,255,255,0)}
+    30%{text-shadow:0 0 2.6vh rgba(255,255,255,.55)}
+    100%{text-shadow:0 0 0 rgba(255,255,255,0)}
+  }
+  .score.rolling{animation:bump .52s cubic-bezier(.2,.9,.2,1), rollglow .52s ease-out}
   /* 卡片閃光：加分綠、扣分紅 */
   @keyframes flashUp{
     0%{box-shadow:0 0 0 0 rgba(74,222,128,0)}
@@ -78,6 +86,8 @@
   .qr canvas{width:13vh; height:13vh; border-radius:.8vh; background:#fff; padding:.5vh; display:block}
   .qr .cap{font-size:1.9vh; color:var(--muted); text-align:right; line-height:1.35}
   .hint{position:fixed; left:1.2vw; bottom:1.2vw; font-size:1.8vh; color:#2a3a4c}
+  .hint.audio-off{color:#8a6d2f}
+  .hint.audio-muted{color:#7a3b3b}
 </style>
 </head>
 <body>
@@ -105,7 +115,7 @@
   <div class="cap">手機控制台<br>掃我</div>
   <canvas id="qrCanvas" width="240" height="240"></canvas>
 </div>
-<div class="hint">按 F 全螢幕</div>
+<div class="hint audio-off" id="hint">按任意鍵開啟音效　·　按 F 全螢幕</div>
 
 <script src="vendor/supabase.js"></script>
 <script src="vendor/qrcode.js"></script>
@@ -147,6 +157,7 @@ function render(s){
   const texts = s.teams.map(t=>fmt(t.score));
   const size = Math.min(...s.teams.map((t,i)=>fitSize(nodes['idx'+i].scoreEl, texts[i])));
 
+  const changed = [];
   s.teams.forEach((t,i)=>{
     const n = nodes['idx'+i]; if(!n) return;
     n.name.innerHTML = `<span class="c">${t.id}</span>　${t.name.replace(/^[A-D]\s*隊$/,'').trim() || t.name}`;
@@ -160,6 +171,7 @@ function render(s){
     // delta
     const d = t.score - from;
     if (d !== 0){
+      changed.push(d);
       // 卡片閃光（加分綠、扣分紅）
       const cls = d > 0 ? 'flash-up' : 'flash-down';
       n.el.classList.remove('flash-up', 'flash-down');
@@ -177,7 +189,9 @@ function render(s){
   // 卡牌橫幅：只在「剛剛發生」時顯示（12 秒內），避免每次更新都跳出殘影
   const b = document.getElementById('banner'), bt = document.getElementById('bannerText');
   const fresh = s.banner && s.banner.text && (Date.now() / 1000 - (s.banner.ts || 0)) < 12;
+  let bannerFired = false;
   if (fresh && s.banner.ts !== b._ts){
+    bannerFired = true;
     b._ts = s.banner.ts;
     bt.textContent = s.banner.text;
     b.classList.add('show');
@@ -186,6 +200,13 @@ function render(s){
   } else if (!fresh){
     b.classList.remove('show');
     b._ts = null;
+  }
+
+  // ---- 音效：卡牌事件優先；否則依「變化最大的一隊」出升調或降調 ----
+  if (bannerFired) sfx('card');
+  else if (changed.length){
+    const big = changed.reduce((a, b) => Math.abs(b) > Math.abs(a) ? b : a, 0);
+    sfx(big > 0 ? 'up' : 'down');
   }
 }
 
@@ -202,9 +223,88 @@ function fitSize(el, txt){
   return Math.max(7, Math.round(size * 10) / 10);
 }
 
+// ================= 音效（Web Audio 即時合成，離線可用、零檔案） =================
+let AC = null, MASTER = null, audioReady = false, muted = false, vol = 0.9;
+window.__sfxCount = 0;          // 供測試計數
+
+function sfxHint(){
+  const h = document.getElementById('hint');
+  if (!h) return;
+  let txt;
+  if (!audioReady){ h.className = 'hint audio-off'; txt = '按任意鍵開啟音效　·　按 F 全螢幕'; }
+  else if (muted){ h.className = 'hint audio-muted'; txt = '音效已靜音（按 M 開啟）　·　按 F 全螢幕'; }
+  else { h.className = 'hint'; txt = '音效開啟（M 靜音　↑↓ 音量 ' + Math.round(vol*100) + '%）　·　按 F 全螢幕'; }
+  h.textContent = txt;
+}
+
+function ensureAudio(){
+  if (!AC){
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return false;
+    try { AC = new C(); } catch(e){ return false; }
+    MASTER = AC.createGain();
+    MASTER.gain.value = vol;
+    MASTER.connect(AC.destination);
+  }
+  if (AC.state === 'suspended') AC.resume();
+  audioReady = (AC.state === 'running');
+  sfxHint();
+  return audioReady;
+}
+
+// 單音：可指定滑音、波形、音量
+function tone(ctx, dest, {f0, f1, at, dur, type, gain}){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(f0, at);
+  if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), at + dur);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g); g.connect(dest);
+  o.start(at); o.stop(at + dur + 0.03);
+}
+
+// 三種聲音的「排程」寫成純函式，現場用 AudioContext、試聽用 OfflineAudioContext 都能跑
+function scheduleUp(ctx, dest, t0){
+  tone(ctx, dest, {f0:784, f1:784, at:t0,        dur:0.11, type:'triangle', gain:0.42});
+  tone(ctx, dest, {f0:1047, f1:1047, at:t0+0.085, dur:0.13, type:'triangle', gain:0.38});
+  tone(ctx, dest, {f0:1568, f1:1568, at:t0+0.165, dur:0.15, type:'sine',     gain:0.22});
+}
+function scheduleDown(ctx, dest, t0){
+  tone(ctx, dest, {f0:392, f1:262, at:t0,        dur:0.17, type:'sawtooth', gain:0.26});
+  tone(ctx, dest, {f0:262, f1:196, at:t0+0.13,   dur:0.19, type:'triangle', gain:0.32});
+}
+function scheduleCard(ctx, dest, t0){
+  tone(ctx, dest, {f0:659, f1:659, at:t0,        dur:0.10, type:'sine', gain:0.30});
+  tone(ctx, dest, {f0:880, f1:880, at:t0+0.075,  dur:0.10, type:'sine', gain:0.30});
+  tone(ctx, dest, {f0:1319,f1:1319,at:t0+0.15,   dur:0.22, type:'triangle', gain:0.28});
+}
+
+function sfx(kind){
+  window.__sfxCount++;
+  if (!audioReady || muted || !AC || !MASTER) return;
+  const t0 = AC.currentTime + 0.01;
+  if (kind === 'up')   scheduleUp(AC, MASTER, t0);
+  else if (kind === 'down') scheduleDown(AC, MASTER, t0);
+  else if (kind === 'card') scheduleCard(AC, MASTER, t0);
+}
+
+// 任何點擊或按鍵都能解鎖音訊；M 靜音、上下鍵調音量
+window.addEventListener('pointerdown', () => { ensureAudio(); }, true);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'm' || e.key === 'M'){ muted = !muted; ensureAudio(); sfxHint(); return; }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown'){
+    vol = Math.min(1, Math.max(0, vol + (e.key === 'ArrowUp' ? 0.1 : -0.1)));
+    if (MASTER) MASTER.gain.value = vol;
+    ensureAudio(); sfxHint(); return;
+  }
+  ensureAudio();
+}, true);
+
 function roll(el, from, to){
-  // 數字滾動（臨場感）＋ 保證最終值：動畫靠 rAF，若分頁被判定為不可見會暫停，
-  // 所以另外掛一個 timer 強制在動畫時間之後把最終數字寫進去（背景分頁 timer 最多延遲 1 秒，不會永遠卡住）。
+  // 數字滾動（要肉眼看得出來）＋ 保證落到最終值
+  // rAF 在分頁不可見時會被暫停，所以另掛 timer 強制在動畫時間後寫定最終數字。
   clearTimeout(el._finish);
   if (from === to){
     cancelAnimationFrame(el._raf);
@@ -213,28 +313,30 @@ function roll(el, from, to){
   }
   const shown = parseInt((el.textContent || '').replace(/[^0-9-]/g, ''), 10);
   const start = Number.isFinite(shown) && shown !== 0 ? shown : from;
-  const dur = Math.min(460, 240 + Math.abs(to - start) * 0.02);   // 差越多滾久一點，但不超過 0.46 秒
+  const diff = Math.abs(to - start);
+  const dur = Math.min(950, 560 + Math.min(390, diff * 0.12));   // 560–950ms，差越多滾越久
 
-  el.classList.remove('bump');
-  void el.offsetWidth;               // 強制重排，讓動畫可以連續觸發
-  el.classList.add('bump');
+  el.classList.remove('bump', 'rolling');
+  void el.offsetWidth;
+  el.classList.add('rolling');
+  clearTimeout(el._cls);
+  el._cls = setTimeout(() => { el.classList.remove('rolling'); el.classList.add('bump'); }, dur);
 
   const t0 = performance.now();
   cancelAnimationFrame(el._raf);
   const step = (now)=>{
-    const p = Math.min(1, (now - t0) / dur);
-    const e = 1 - Math.pow(1 - p, 3);          // ease-out：一開始快、收尾穩
+    const p = Math.min(1, Math.max(0, (now - t0) / dur));   // 夾住 0–1：rAF 時間戳可能略早於 t0
+    const e = 1 - Math.pow(1 - p, 3);          // 前段快、後段慢，收在正確數字
     el.textContent = fmt(Math.round(start + (to - start) * e));
     if (p < 1) el._raf = requestAnimationFrame(step);
     else el.textContent = fmt(to);
   };
   el._raf = requestAnimationFrame(step);
 
-  // 保險：不論 rAF 有沒有跑，時間到就把最終值寫定
   el._finish = setTimeout(() => {
     cancelAnimationFrame(el._raf);
     el.textContent = fmt(to);
-  }, dur + 90);
+  }, dur + 120);
 }
 
 function drawQR(){

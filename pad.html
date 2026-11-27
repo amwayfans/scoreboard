@@ -216,6 +216,11 @@ let state = null;   // 真正初始化在 COLORS/IDS 之後（避免 TDZ）
 let undoStack = [];
 let rtChannel = null;
 
+// 同一個房間只能有一個控制台在寫分數；多開的分頁自動轉唯讀
+const MY_ID = 'pad-' + Math.random().toString(36).slice(2, 10);
+const MY_AT = Date.now();
+let isWriter = true;
+
 function teamOf(id){ return state.teams.find(t=>t.id===id); }
 function addLog(desc,card){
   state.log = state.log || [];
@@ -228,8 +233,42 @@ function pushUndo(){
   if (undoStack.length > 60) undoStack.shift();
 }
 function publish(){
+  if (!rtChannel || !isWriter) return;   // 唯讀的分頁不廣播，避免互相覆蓋
+  rtChannel.send({type:'broadcast', event:'state', payload:{state, writer: MY_ID}});
+}
+
+// 最早開啟、且還活著的那一個控制台是唯一寫入者（其他的轉唯讀）
+function electWriter(){
   if (!rtChannel) return;
-  rtChannel.send({type:'broadcast', event:'state', payload:{state}});
+  const st = rtChannel.presenceState() || {};
+  const live = [];
+  Object.keys(st).forEach(k => (st[k] || []).forEach(p => { if (p && p.at) live.push({id: k, at: p.at}); }));
+  live.sort((a, b) => (a.at - b.at) || (a.id < b.id ? -1 : 1));
+  const winner = live.length ? live[0].id : MY_ID;
+  const nowWriter = (winner === MY_ID);
+  if (nowWriter !== isWriter){ isWriter = nowWriter; }
+  updateWriterBadge(live.length);
+}
+
+function updateWriterBadge(count){
+  let el = document.getElementById('writerBadge');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'writerBadge';
+    el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));'
+      + 'z-index:60;padding:10px 12px;border-radius:10px;font-size:14px;line-height:1.45;display:none;'
+      + 'background:#3a1116;border:1px solid #7a2230;color:#ffc9d1;text-align:center';
+    document.body.appendChild(el);
+  }
+  if (!isWriter){
+    el.style.display = 'block';
+    el.textContent = '唯讀模式：另一個控制台正在操作（同時開 ' + count + ' 個）。'
+      + '請只留一個控制台分頁，關掉其他的就會恢復。';
+    document.body.style.filter = 'saturate(.55)';
+  } else {
+    el.style.display = 'none';
+    document.body.style.filter = '';
+  }
 }
 function commit(){
   state.updated = Date.now()/1000;
@@ -307,15 +346,28 @@ function connect(){
     setConn(false); toast('無法載入連線模組', true); return;
   }
   const sb = supabase.createClient(SB_URL, SB_KEY);
-  rtChannel = sb.channel('room:' + ROOM, {config:{broadcast:{self:false}}});
+  rtChannel = sb.channel('room:' + ROOM, {
+    config: { broadcast: {self:false}, presence: {key: MY_ID} }
+  });
   rtChannel.on('broadcast', {event:'hello'}, () => { publish(); });   // 大螢幕剛開，立刻重播
+  rtChannel.on('presence', {event:'sync'}, () => { electWriter(); });
+  rtChannel.on('presence', {event:'join'}, () => { electWriter(); });
+  rtChannel.on('presence', {event:'leave'}, () => { electWriter(); });
   rtChannel.subscribe(status => {
     const ok = status === 'SUBSCRIBED';
     setConn(ok);
-    if (ok) publish();
+    if (ok){
+      rtChannel.track({at: MY_AT});
+      electWriter();
+      publish();
+    }
   });
-  // 心跳：每 2 秒重播一次，避免大螢幕重開或訊息遺失
-  setInterval(() => { if (rtChannel) publish(); }, 2000);
+  // 心跳：每 2 秒重新宣告存在＋重播狀態（避免大螢幕重開或訊息遺失）
+  setInterval(() => {
+    if (!rtChannel) return;
+    rtChannel.track({at: MY_AT});
+    publish();
+  }, 2000);
 }
 
 const COLORS=['#3B82F6','#EF4444','#F59E0B','#10B981'];
@@ -425,6 +477,7 @@ function sendEvent(ev){
 }
 
 function send(action){
+  if(!isWriter){ toast('這頁是唯讀（另一個控制台在操作）',true); return; }
   if(locked){ toast('已鎖定，先解鎖',true); return; }
   const card=document.getElementById('cardName').value.trim();
   if(!action.noCard&&card) action.card=card;

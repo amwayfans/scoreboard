@@ -233,8 +233,13 @@ function connect(){
   if (typeof supabase === 'undefined'){ setConn(false); showHint('無法載入連線模組（vendor/supabase.js）'); return; }
   const sb = supabase.createClient(SB_URL, SB_KEY);
   rtChannel = sb.channel('room:' + ROOM, { config: { broadcast: { self: false } } });
+  let lastUpd = 0;
   rtChannel.on('broadcast', { event: 'state' }, ({ payload }) => {
-    if (payload && payload.state){ gotState = true; hideHint(); render(payload.state); setConn(true); }
+    const s = payload && payload.state;
+    if (!s) return;
+    if (s.updated && s.updated < lastUpd - 0.002) return;   // 舊分頁送來的過期狀態，忽略
+    lastUpd = Math.max(lastUpd, s.updated || 0);
+    gotState = true; hideHint(); render(s); setConn(true);
   });
   rtChannel.subscribe((status) => {
     const ok = status === 'SUBSCRIBED';

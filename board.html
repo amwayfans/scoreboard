@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>即時計分板</title>
+<style>
+  :root{
+    --bg:#080c12; --panel:#0f1620; --ink:#f4f7fb; --muted:#8fa3b8;
+    --line:#1e2a38; --ok:#22c55e; --bad:#ef4444;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; background:var(--bg); color:var(--ink);
+    font-family:"Noto Sans TC","Noto Sans CJK TC",-apple-system,"Segoe UI",sans-serif;
+    overflow:hidden; -webkit-font-smoothing:antialiased}
+  .wrap{height:100%; display:flex; flex-direction:column}
+
+  /* 頂部 */
+  .top{height:9vh; display:flex; align-items:center; justify-content:space-between;
+       padding:0 2.2vw; border-bottom:1px solid var(--line); flex:0 0 auto}
+  .event{font-size:3.4vh; font-weight:700; letter-spacing:.04em}
+  .status{display:flex; align-items:center; gap:1.2vw; font-size:2.1vh; color:var(--muted)}
+  .dot{width:1.4vh; height:1.4vh; border-radius:50%; background:var(--ok); box-shadow:0 0 1.2vh var(--ok)}
+  .dot.off{background:var(--bad); box-shadow:0 0 1.2vh var(--bad)}
+
+  /* 卡牌橫幅 */
+  .banner{height:0; overflow:hidden; opacity:0; transition:height .28s ease, opacity .2s ease; flex:0 0 auto;
+    background:linear-gradient(90deg,rgba(59,130,246,.16),rgba(239,68,68,.10));
+    border-bottom:1px solid transparent; display:flex; align-items:center; justify-content:center}
+  .banner.show{height:9vh; opacity:1; border-bottom-color:var(--line)}
+  .banner .txt{font-size:3.6vh; font-weight:800; letter-spacing:.06em}
+  .banner .tag{font-size:2.2vh; color:var(--muted); margin-right:1.4vw}
+
+  /* 四隊 */
+  .teams{flex:1 1 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:1.2vw; padding:1.6vw 2vw 2.4vw}
+  .team{position:relative; border-radius:1.6vh; background:var(--panel);
+    border:2px solid var(--line); display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:1vh; overflow:hidden}
+  .team::before{content:""; position:absolute; inset:0 auto 0 0; width:.9vh; background:var(--c)}
+  .team.lead{border-color:var(--c); box-shadow:0 0 3vh -0.6vh var(--c) inset, 0 0 2.4vh -1vh var(--c)}
+  .rank{position:absolute; top:1.5vh; right:1.5vh; font-size:3vh; font-weight:900;
+    color:var(--bg); background:var(--c); border-radius:999px; padding:.55vh 1.7vh; min-width:5.4vh; text-align:center;
+    box-shadow:0 .4vh 1.6vh rgba(0,0,0,.45)}
+  .name{font-size:6.2vh; font-weight:800; letter-spacing:.02em; line-height:1; color:var(--ink)}
+  .name .c{color:var(--c)}
+  .score{font-size:26vh; font-weight:900; line-height:.9; letter-spacing:-.02em; white-space:nowrap;
+    font-variant-numeric:tabular-nums; text-shadow:0 0 4vh rgba(0,0,0,.6)}
+  .delta{position:absolute; bottom:9vh; font-size:6vh; font-weight:900; opacity:0;
+    transform:translateY(1vh); transition:opacity .2s, transform .2s}
+  .delta.show{opacity:1; transform:translateY(0)}
+  .delta.up{color:#4ade80}
+  .delta.down{color:#f87171}
+
+  /* 右下 QR：手機控制台 */
+  .qr{position:fixed; right:2vw; bottom:2vw; display:flex; align-items:flex-end; gap:.8vw;
+      opacity:.92}
+  .qr canvas{width:13vh; height:13vh; border-radius:.8vh; background:#fff; padding:.5vh; display:block}
+  .qr .cap{font-size:1.9vh; color:var(--muted); text-align:right; line-height:1.35}
+  .hint{position:fixed; left:1.2vw; bottom:1.2vw; font-size:1.8vh; color:#2a3a4c}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="event" id="event">未來式團隊競賽</div>
+<div id="hint" style="display:none;position:fixed;left:50%;top:12vh;transform:translateX(-50%);
+  background:#3a2a12;border:1px solid #7a5b22;color:#ffd89a;padding:1.4vh 2.4vh;border-radius:1vh;
+  font-size:2.2vh;z-index:50"></div>
+    <div class="status">
+      <span id="upd">—</span>
+      <span class="dot" id="dot"></span>
+      <span id="conn">已連線</span>
+    </div>
+  </div>
+
+  <div class="banner" id="banner">
+    <span class="tag">本回合</span><span class="txt" id="bannerText"></span>
+  </div>
+
+  <div class="teams" id="teams"></div>
+</div>
+
+<div class="qr">
+  <div class="cap">手機控制台<br>掃我</div>
+  <canvas id="qrCanvas" width="240" height="240"></canvas>
+</div>
+<div class="hint">按 F 全螢幕</div>
+
+<script src="vendor/supabase.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script>
+const COLORS = ['#3B82F6','#EF4444','#F59E0B','#10B981'];
+let state = null;
+let last = {};        // 上一輪分數，用於滾動與 delta
+const nodes = {};     // id -> {el, scoreEl, ...}
+
+function fmt(n){ return (n<0?'−':'') + Math.abs(n).toLocaleString('en-US'); }
+
+function build(){
+  const box = document.getElementById('teams');
+  box.innerHTML = '';
+  for (let i=0;i<4;i++){
+    const el = document.createElement('div');
+    el.className = 'team';
+    el.style.setProperty('--c', COLORS[i]);
+    el.innerHTML = `<div class="rank"></div>
+      <div class="name"></div>
+      <div class="score">0</div>
+      <div class="delta"></div>`;
+    box.appendChild(el);
+    nodes['idx'+i] = {el, rank:el.querySelector('.rank'), name:el.querySelector('.name'),
+                      scoreEl:el.querySelector('.score'), delta:el.querySelector('.delta')};
+  }
+}
+
+function render(s){
+  const prev = state; state = s;
+  document.getElementById('event').textContent = s.event || '';
+  document.getElementById('upd').textContent = s.updated
+    ? '最後更新 ' + new Date(s.updated*1000).toLocaleTimeString('zh-TW',{hour12:false}) : '—';
+
+  const maxScore = Math.max(...s.teams.map(t=>t.score));
+  const leadCount = s.teams.filter(t=>t.score===maxScore).length;
+
+  // 四隊用同一個字級：取「最長數字所需的最小字級」，版面才對齊
+  const texts = s.teams.map(t=>fmt(t.score));
+  const size = Math.min(...s.teams.map((t,i)=>fitSize(nodes['idx'+i].scoreEl, texts[i])));
+
+  s.teams.forEach((t,i)=>{
+    const n = nodes['idx'+i]; if(!n) return;
+    n.name.innerHTML = `<span class="c">${t.id}</span>　${t.name.replace(/^[A-D]\s*隊$/,'').trim() || t.name}`;
+    n.scoreEl.style.fontSize = size + 'vh';
+    const from = prev && prev.teams[i] ? prev.teams[i].score : t.score;
+    roll(n.scoreEl, from, t.score);
+    // 名次與領先
+    const rank = s.teams.slice().sort((a,b)=>b.score-a.score).findIndex(x=>x.id===t.id)+1;
+    n.rank.textContent = rank;
+    n.el.classList.toggle('lead', leadCount===1 && t.score===maxScore && maxScore>0);
+    // delta
+    const d = t.score - from;
+    if (d !== 0){
+      n.delta.textContent = (d>0?'+':'') + d.toLocaleString('en-US');
+      n.delta.className = 'delta show ' + (d>0?'up':'down');
+      clearTimeout(n.delta._t);
+      n.delta._t = setTimeout(()=>{ n.delta.className='delta'; }, 2600);
+    }
+  });
+
+  // 卡牌橫幅：只在「剛剛發生」時顯示（12 秒內），避免每次更新都跳出殘影
+  const b = document.getElementById('banner'), bt = document.getElementById('bannerText');
+  const fresh = s.banner && s.banner.text && (Date.now() / 1000 - (s.banner.ts || 0)) < 12;
+  if (fresh && s.banner.ts !== b._ts){
+    b._ts = s.banner.ts;
+    bt.textContent = s.banner.text;
+    b.classList.add('show');
+    clearTimeout(b._t);
+    b._t = setTimeout(()=>b.classList.remove('show'), 9000);
+  } else if (!fresh){
+    b.classList.remove('show');
+    b._ts = null;
+  }
+}
+
+function fitSize(el, txt){
+  // 用「26vh 時的文字寬」線性回推可用字級；四隊最後取同一個值，版面才整齊
+  const box = el.parentElement;
+  const avail = Math.max(60, box.clientWidth * 0.86);
+  el.style.fontSize = '26vh';
+  el.style.visibility = 'hidden';
+  el.textContent = txt;
+  const w = el.scrollWidth || 1;
+  el.style.visibility = '';
+  const size = Math.min(26, 26 * avail / w);
+  return Math.max(7, Math.round(size * 10) / 10);
+}
+
+function roll(el, from, to){
+  if (from === to){ el.textContent = fmt(to); return; }
+  const t0 = performance.now(), dur = 420;
+  cancelAnimationFrame(el._raf);
+  const step = (now)=>{
+    const p = Math.min(1, (now-t0)/dur);
+    const e = 1 - Math.pow(1-p, 3);
+    el.textContent = fmt(Math.round(from + (to-from)*e));
+    if (p < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+
+function drawQR(){
+  const cv = document.getElementById('qrCanvas');
+  if (!cv) return;
+  const url = padUrl();
+  try{
+    if (typeof qrcode !== 'function') throw new Error('no lib');
+    const qr = qrcode(0, 'M');          // 自動版本、M 級容錯
+    qr.addData(url);
+    qr.make();
+    const n = qr.getModuleCount();
+    const ctx = cv.getContext('2d');
+    const pad = 16;
+    const size = cv.width - pad * 2;
+    const cell = size / n;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#000000';
+    for (let r = 0; r < n; r++){
+      for (let c = 0; c < n; c++){
+        if (qr.isDark(r, c)){
+          ctx.fillRect(Math.round(pad + c * cell), Math.round(pad + r * cell),
+                       Math.ceil(cell), Math.ceil(cell));
+        }
+      }
+    }
+    cv.dataset.url = url;
+  }catch(e){
+    // 後備：退回伺服器產生的 PNG（若有）
+    cv.outerHTML = '<img src="/qr.png" alt="QR" style="width:11vh;height:11vh;background:#fff;padding:.5vh;border-radius:.8vh">';
+  }
+}
+
+// ---- 線上版：Supabase Realtime 廣播 ----
+const SB_URL = 'https://xhbbgnsnniphsephwsrq.supabase.co';
+const SB_KEY = 'sb_publishable_nrWaOOLOr9RJVvkPqh0hoQ_cEGpKPcF';
+const DEFAULT_ROOM = 'tsust-mach-20261128-x7k3';
+const ROOM = (new URLSearchParams(location.hash.slice(1)).get('r')) || DEFAULT_ROOM;
+
+function padUrl(){
+  const u = new URL(location.href);
+  u.pathname = u.pathname.replace(/board\.html$/, 'pad.html');
+  if (!/pad\.html$/.test(u.pathname)) u.pathname = u.pathname.replace(/\/?$/, '/') + 'pad.html';
+  return u.toString();
+}
+
+let rtChannel = null, gotState = false;
+
+function connect(){
+  if (typeof supabase === 'undefined'){ setConn(false); showHint('無法載入連線模組（vendor/supabase.js）'); return; }
+  const sb = supabase.createClient(SB_URL, SB_KEY);
+  rtChannel = sb.channel('room:' + ROOM, { config: { broadcast: { self: false } } });
+  rtChannel.on('broadcast', { event: 'state' }, ({ payload }) => {
+    if (payload && payload.state){ gotState = true; hideHint(); render(payload.state); setConn(true); }
+  });
+  rtChannel.subscribe((status) => {
+    const ok = status === 'SUBSCRIBED';
+    setConn(ok);
+    if (ok){
+      rtChannel.send({ type: 'broadcast', event: 'hello', payload: {} });
+    }
+  });
+  // 定期打招呼：控制台收到就立刻重播目前狀態
+  setInterval(() => {
+    if (rtChannel) rtChannel.send({ type: 'broadcast', event: 'hello', payload: {} });
+  }, 5000);
+}
+
+function showHint(msg){
+  const h = document.getElementById('hint');
+  if (h){ h.textContent = msg; h.style.display = 'block'; }
+}
+function hideHint(){
+  const h = document.getElementById('hint');
+  if (h) h.style.display = 'none';
+}
+function setConn(ok){
+  const dot = document.getElementById('dot'), c = document.getElementById('conn');
+  dot.classList.toggle('off', !ok);
+  c.textContent = ok ? '已連線' : '連線中斷，重試中';
+}
+
+document.addEventListener('keydown', (e)=>{
+  if (e.key === 'f' || e.key === 'F'){
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  }
+});
+
+build();
+drawQR();
+connect();
+
+// 3 秒内沒收到任何狀態就提示（控制台還沒開）
+setTimeout(()=>{ if (!gotState) showHint('等待手機控制台連線…（請確認控制台已開啟，且網址的房間代碼相同）'); }, 3000);
+</script>
+</body>
+</html>

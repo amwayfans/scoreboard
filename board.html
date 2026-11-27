@@ -307,6 +307,8 @@ function roll(el, from, to){
   // rAF 在分頁不可見時會被暫停，所以另掛 timer 強制在動畫時間後寫定最終數字。
   clearTimeout(el._finish);
   if (from === to){
+    // 正在滾向同一個目標時不要打斷（狀態心跳會重送同一個分數，會把動畫切掉）
+    if (el._animating && el._target === to) return;
     cancelAnimationFrame(el._raf);
     el.textContent = fmt(to);
     return;
@@ -324,18 +326,21 @@ function roll(el, from, to){
 
   const t0 = performance.now();
   cancelAnimationFrame(el._raf);
+  el._animating = true;
+  el._target = to;
   const step = (now)=>{
     const p = Math.min(1, Math.max(0, (now - t0) / dur));   // 夾住 0–1：rAF 時間戳可能略早於 t0
     const e = 1 - Math.pow(1 - p, 3);          // 前段快、後段慢，收在正確數字
     el.textContent = fmt(Math.round(start + (to - start) * e));
     if (p < 1) el._raf = requestAnimationFrame(step);
-    else el.textContent = fmt(to);
+    else { el.textContent = fmt(to); el._animating = false; }
   };
   el._raf = requestAnimationFrame(step);
 
   el._finish = setTimeout(() => {
     cancelAnimationFrame(el._raf);
     el.textContent = fmt(to);
+    el._animating = false;
   }, dur + 120);
 }
 

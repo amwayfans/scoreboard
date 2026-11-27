@@ -212,12 +212,15 @@ function render(s){
 
 function fitSize(el, txt){
   // 用「26vh 時的文字寬」線性回推可用字級；四隊最後取同一個值，版面才整齊
+  // 量完要把原本顯示的內容還回去，否則會先閃一下新數字再被動畫拉回去
   const box = el.parentElement;
   const avail = Math.max(60, box.clientWidth * 0.86);
+  const keep = el.textContent;
   el.style.fontSize = '26vh';
   el.style.visibility = 'hidden';
   el.textContent = txt;
   const w = el.scrollWidth || 1;
+  el.textContent = keep;
   el.style.visibility = '';
   const size = Math.min(26, 26 * avail / w);
   return Math.max(7, Math.round(size * 10) / 10);
@@ -310,11 +313,13 @@ function roll(el, from, to){
     // 正在滾向同一個目標時不要打斷（狀態心跳會重送同一個分數，會把動畫切掉）
     if (el._animating && el._target === to) return;
     cancelAnimationFrame(el._raf);
+    el._cur = to;
     el.textContent = fmt(to);
     return;
   }
-  const shown = parseInt((el.textContent || '').replace(/[^0-9-]/g, ''), 10);
-  const start = Number.isFinite(shown) && shown !== 0 ? shown : from;
+  // 起點不要讀 textContent（fitSize 量字寬時已經把新數字寫進去了）；
+  // 動畫中就用目前滾到的值，否則用上一個狀態的分數。
+  const start = (el._animating && typeof el._cur === 'number') ? el._cur : from;
   const diff = Math.abs(to - start);
   const dur = Math.min(950, 560 + Math.min(390, diff * 0.12));   // 560–950ms，差越多滾越久
 
@@ -331,14 +336,17 @@ function roll(el, from, to){
   const step = (now)=>{
     const p = Math.min(1, Math.max(0, (now - t0) / dur));   // 夾住 0–1：rAF 時間戳可能略早於 t0
     const e = 1 - Math.pow(1 - p, 3);          // 前段快、後段慢，收在正確數字
-    el.textContent = fmt(Math.round(start + (to - start) * e));
+    const v = Math.round(start + (to - start) * e);
+    el._cur = v;
+    el.textContent = fmt(v);
     if (p < 1) el._raf = requestAnimationFrame(step);
-    else { el.textContent = fmt(to); el._animating = false; }
+    else { el._cur = to; el.textContent = fmt(to); el._animating = false; }
   };
   el._raf = requestAnimationFrame(step);
 
   el._finish = setTimeout(() => {
     cancelAnimationFrame(el._raf);
+    el._cur = to;
     el.textContent = fmt(to);
     el._animating = false;
   }, dur + 120);

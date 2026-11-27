@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>即時計分板（四隊）</title>
+<style>
+  :root{--bg:#0b1220;--panel:#151f2e;--ink:#eef4fb;--muted:#8fa3b8;--line:#26374a;--ok:#22c55e}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","Noto Sans CJK TC",-apple-system,sans-serif;
+    display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+  .box{max-width:620px;width:100%}
+  h1{font-size:26px;margin:0 0 6px}
+  p.sub{color:var(--muted);margin:0 0 24px;font-size:15px;line-height:1.6}
+  a.card{display:block;text-decoration:none;color:var(--ink);background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:18px 20px;margin-bottom:14px}
+  a.card:active{transform:scale(.99)}
+  a.card b{display:block;font-size:19px;margin-bottom:4px}
+  a.card span{color:var(--muted);font-size:14px;line-height:1.5}
+  a.board{border-left:6px solid #3B82F6}
+  a.pad{border-left:6px solid #22c55e}
+  .note{margin-top:22px;font-size:13px;color:var(--muted);line-height:1.7;border-top:1px solid var(--line);padding-top:14px}
+  .room{margin-top:6px;font-family:ui-monospace,monospace;color:#ffd89a;word-break:break-all;font-size:13px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>即時計分板（四隊）</h1>
+  <p class="sub">手機負責統計、大螢幕即時顯示。用同一個網址的房間代碼連在一起。</p>
+
+  <a class="card board" href="board.html">
+    <b>大螢幕（投影機那台）</b>
+    <span>超大字分數、名次、卡牌橫幅。開啟後按 F11 全螢幕。這一頁只能看，不能改。</span>
+  </a>
+
+  <a class="card pad" href="pad.html">
+    <b>手機控制台（你手上這支）</b>
+    <span>加減分、卡牌算式、改隊名、復原、鎖定。分數存在這支手機裡，關掉再開也還在。</span>
+  </a>
+
+  <div class="note">
+    兩頁必須是同一個房間：網址最後的 <code>#r=…</code> 要一樣。
+    大螢幕那台的網址給它一次就好，之後大螢幕右下的 QR 就是控制台網址，手機掃了直接進同一個房間。
+    <div class="room" id="roomLine"></div>
+  </div>
+</div>
+<script>
+  const room = new URLSearchParams(location.hash.slice(1)).get('r') || '（預設房間）';
+  document.getElementById('roomLine').textContent = '目前房間：#r=' + room;
+  // 把房間代碼帶進兩個連結
+  const hash = location.hash;
+  if (hash){
+    document.querySelector('a.board').href = 'board.html' + hash;
+    document.querySelector('a.pad').href = 'pad.html' + hash;
+  }
+</script>
+</body>
+</html>

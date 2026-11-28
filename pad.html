@@ -62,11 +62,42 @@
   .row{gap:6px;margin-top:6px}
   .big{padding:12px 6px;font-size:16px;border-radius:10px}
   h3{font-size:13px;margin:14px 0 6px}
-  details.ops>.opsbody{padding-top:10px}
-  summary{cursor:pointer;font-weight:800;font-size:14px;color:#cfe0f2;list-style:none}
+  details.ops>.opsbody{padding-top:12px;display:flex;flex-direction:column;gap:14px}
+  summary{cursor:pointer;font-weight:900;font-size:16px;color:#eaf3ff;list-style:none;padding:4px 0}
   summary::-webkit-details-marker{display:none}
   summary::before{content:"▸ ";color:#8fa3b8}
   details[open] summary::before{content:"▾ "}
+
+  /* ===== 卡牌算式：一個算式一個獨立區塊 ===== */
+  .op{background:#121d2b;border:1px solid #2b3f57;border-left:5px solid #3B82F6;
+      border-radius:14px;padding:14px 12px 12px}
+  .op.warn{border-left-color:#F59E0B}
+  .op h4{margin:0;font-size:18px;font-weight:900;color:#eaf3ff;
+      display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.35}
+  .op h4 .num{display:inline-flex;align-items:center;justify-content:center;flex:none;
+      width:27px;height:27px;border-radius:999px;background:#1e3a5f;color:#d6e8ff;font-size:15px;font-weight:900}
+  .op.warn h4 .num{background:#4a3312;color:#ffd89a}
+  .op h4 .tag{font-size:13px;font-weight:700;color:#a8bccf;background:#0d1725;
+      border:1px solid #2b3f57;border-radius:999px;padding:3px 10px}
+  .op .oprow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:11px}
+  .op .oprow.two{grid-template-columns:repeat(2,1fr)}
+  .op .oprow.one{grid-template-columns:1fr}
+  .op select,.op input[type=number]{padding:14px 10px;font-size:18px;font-weight:800;
+      min-height:54px;border-radius:12px;border-color:#2b3f57;background:#182635}
+  .op .big{min-height:54px;font-size:19px;padding:14px 8px}
+  .op .hint{margin:10px 0 0;font-size:14.5px;line-height:1.55;color:#a8bccf}
+  .op label.inline{display:flex;align-items:center;gap:8px;margin:0;min-height:54px;
+      background:#182635;border:1px solid #2b3f57;border-radius:12px;padding:0 12px;
+      font-size:16px;font-weight:800;color:#dbe9f7}
+  .op label.inline input{flex:1;min-height:auto;border:none;background:transparent;
+      padding:6px 0;text-align:right;font-size:19px;font-weight:900;color:#fff}
+  .op .chk{margin-top:11px}
+  .op .chk label{font-size:17px;font-weight:800;min-height:50px;padding:12px 14px;border-color:#2b3f57;background:#182635}
+  .op label.inline input::-webkit-outer-spin-button,
+  .op label.inline input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+  /* 操作紀錄字大一點 */
+  .log{font-size:14.5px;line-height:1.7}
   .toast.show{opacity:1}
   .toast.err{background:#331414;border-color:#5b2323;color:#ffc0c0}
 </style>
@@ -119,64 +150,89 @@
 </div>
 </details>
 
-<details class="card ops"><summary>卡牌算式（點開）</summary>
+<details class="card ops" id="opsBox"><summary>卡牌算式（點開）</summary>
 <div class="opsbody">
-  <label>① 同步為目前最高分（量子糾纏複製器）</label>
-  <div class="row two">
-    <select id="syncTeam"></select>
-    <button class="btn big" onclick="op('syncmax',{team:v('syncTeam')})">套用</button>
-  </div>
 
-  <label>② 吸取分數（黑洞引力晶片／極光能源抽取器）</label>
-  <div class="row">
-    <select id="fromTeam"></select>
-    <select id="toTeam"></select>
-    <button class="btn big" onclick="op('transfer',{from:v('fromTeam'),to:v('toTeam'),pct:num('pctIn',30)})">吸取</button>
-  </div>
-  <input type="number" id="pctIn" value="30" placeholder="百分比">
-  <div class="st" style="margin-top:4px">左邊＝被吸的隊、右邊＝得分的隊；預設 30%</div>
+  <section class="op">
+    <h4><span class="num">1</span>同步為目前最高分<span class="tag">量子糾纏複製器</span></h4>
+    <div class="oprow two">
+      <select id="syncTeam"></select>
+      <button class="big" onclick="op('syncmax',{team:v('syncTeam')})">套用</button>
+    </div>
+  </section>
 
-  <label>③ 減半（重力反轉矩陣／VR 禁錮猜輸）</label>
-  <div class="row two">
-    <select id="halfTeam"></select>
-    <button class="btn big warn" onclick="confirmOp('減半','halve',{team:v('halfTeam')})">套用</button>
-  </div>
+  <section class="op">
+    <h4><span class="num">2</span>吸取分數<span class="tag">黑洞引力晶片</span></h4>
+    <div class="oprow two">
+      <select id="fromTeam"></select>
+      <select id="toTeam"></select>
+    </div>
+    <div class="oprow two">
+      <label class="inline">百分比<input type="number" id="pctIn" value="30" inputmode="numeric"></label>
+      <button class="big" onclick="op('transfer',{from:v('fromTeam'),to:v('toTeam'),pct:num('pctIn',30)})">吸取</button>
+    </div>
+    <p class="hint">左邊＝被吸的隊、右邊＝得分的隊（預設 30%）</p>
+  </section>
 
-  <label>④ 多隊平均（正義聯盟重力壓制）</label>
-  <div class="chk" id="avgChk"></div>
-  <div class="row two" style="margin-top:8px">
-    <button class="btn big" onclick="op('average',{teams:checked('avg')})">平均</button>
-    <button class="btn big" onclick="checked('avg',false)">清除勾選</button>
-  </div>
+  <section class="op warn">
+    <h4><span class="num">3</span>減半<span class="tag">重力反轉矩陣</span></h4>
+    <div class="oprow two">
+      <select id="halfTeam"></select>
+      <button class="big warn" onclick="confirmOp('減半','halve',{team:v('halfTeam')})">套用</button>
+    </div>
+  </section>
 
-  <label>⑤ 首尾對調（高維度審判法槌）</label>
-  <button class="btn big warn" style="width:100%;margin-top:4px" onclick="confirmOp('首尾對調','swap_extremes',{})">第一名 ↔ 最後一名 交換分數</button>
+  <section class="op">
+    <h4><span class="num">4</span>多隊平均<span class="tag">正義聯盟重力壓制</span></h4>
+    <div class="chk" id="avgChk"></div>
+    <div class="oprow two">
+      <button class="big" onclick="op('average',{teams:checked('avg')})">平均</button>
+      <button class="big" onclick="checked('avg',false)">清除勾選</button>
+    </div>
+  </section>
 
-  <label>⑥ 全場吸取（元宇宙金融海嘯）</label>
-  <div class="row">
-    <select id="drainTeam"></select>
-    <input type="number" id="drainVal" value="1000">
-    <button class="btn big warn" onclick="confirmOp('全場吸取','drain_all',{team:v('drainTeam'),value:num('drainVal',1000)})">套用</button>
-  </div>
-  <div class="st" style="margin-top:4px">他隊各扣 N，本隊加 N×3</div>
+  <section class="op warn">
+    <h4><span class="num">5</span>首尾對調<span class="tag">高維度審判法槌</span></h4>
+    <div class="oprow one">
+      <button class="big warn" onclick="confirmOp('首尾對調','swap_extremes',{})">第一名 ↔ 最後一名 交換分數</button>
+    </div>
+  </section>
 
-  <label>⑦ 平分目標隊分數（天網共享竊聽器／量子共振詛咒）</label>
-  <div class="row">
-    <select id="splitTarget"></select>
-    <select id="ally1"></select>
-    <select id="ally2"></select>
-  </div>
-  <div class="row two" style="margin-top:8px">
-    <input type="number" id="splitPct" value="50">
-    <button class="btn big" onclick="op('split',{target:v('splitTarget'),allies:[v('ally1'),v('ally2')].filter(Boolean),pct:num('splitPct',50)})">平分給盟友</button>
-  </div>
+  <section class="op warn">
+    <h4><span class="num">6</span>全場吸取<span class="tag">元宇宙金融海嘯</span></h4>
+    <div class="oprow two">
+      <select id="drainTeam"></select>
+      <label class="inline">每隊扣<input type="number" id="drainVal" value="1000" inputmode="numeric"></label>
+    </div>
+    <div class="oprow one">
+      <button class="big warn" onclick="confirmOp('全場吸取','drain_all',{team:v('drainTeam'),value:num('drainVal',1000)})">套用</button>
+    </div>
+    <p class="hint">他隊各扣 N、本隊加 N × 3</p>
+  </section>
 
-  <label>⑧ 兩隊分數互換（平行宇宙置換艙）</label>
-  <div class="row">
-    <select id="swapA"></select>
-    <select id="swapB"></select>
-    <button class="btn big warn" onclick="confirmOp('分數互換','swap_team_scores',{team_a:v('swapA'),team_b:v('swapB')})">互換</button>
-  </div>
+  <section class="op">
+    <h4><span class="num">7</span>平分目標隊分數<span class="tag">天網共享竊聽器</span></h4>
+    <div class="oprow">
+      <select id="splitTarget"></select>
+      <select id="ally1"></select>
+      <select id="ally2"></select>
+    </div>
+    <div class="oprow two">
+      <label class="inline">百分比<input type="number" id="splitPct" value="50" inputmode="numeric"></label>
+      <button class="big" onclick="op('split',{target:v('splitTarget'),allies:[v('ally1'),v('ally2')].filter(Boolean),pct:num('splitPct',50)})">平分給盟友</button>
+    </div>
+    <p class="hint">第一個＝被平分的隊，後兩個＝收分的盟友</p>
+  </section>
+
+  <section class="op warn">
+    <h4><span class="num">8</span>兩隊分數互換<span class="tag">平行宇宙置換艙</span></h4>
+    <div class="oprow">
+      <select id="swapA"></select>
+      <select id="swapB"></select>
+      <button class="big warn" onclick="confirmOp('分數互換','swap_team_scores',{team_a:v('swapA'),team_b:v('swapB')})">互換</button>
+    </div>
+  </section>
+
 </div>
 </details>
 
